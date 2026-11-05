@@ -207,12 +207,6 @@ docker compose exec iris iris session IRISAPP "##class(%UnitTest.Manager).RunTes
 
 The API and replay mode do not require an external model key. Live Agent calls require outbound network access from the container and the configured provider key.
 
-## Contest submission checklist
-
-- [ ] Publish this source repository on GitHub or GitLab.
-- [ ] Submit the Open Exchange entry and contest application before the contest deadline.
-- [ ] Include the Open Exchange link and, if participating as a team, all team members' Developer Community profile links here.
-- [ ] Record a short live demo with IRIS running; a static recording of API responses alone does not qualify for the online demo bonus.
 
 ## License
 
