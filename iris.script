@@ -1,0 +1,49 @@
+zn "%SYS"
+do ##class(Security.Users).UnExpireUserPasswords("*")
+set tURL="https://pm.community.intersystems.com/packages/zpm/latest/installer"
+set r=##class(%Net.HttpRequest).%New()
+set r.Server="pm.community.intersystems.com"
+set r.SSLConfiguration="ISC.FeatureTracker.SSL.Config"
+do r.Get("/packages/zpm/latest/installer")
+do $system.OBJ.LoadStream(r.HttpResponse.Data,"c")
+zpm "enable -community"
+
+zn "IRISAPP"
+zpm "install iris-llm"
+zpm "load /home/irisowner/dev/ -v":1:1
+
+// --- REST Web application for API ---
+zn "%SYS"
+kill props
+set props("NameSpace")="IRISAPP"
+set props("DispatchClass")="ReferralPilot.API"
+set props("Enabled")=1
+set props("IsNameSpaceDefault")=0
+set props("Recurse")=1
+set props("Type")=2
+set props("CSPZENEnabled")=1
+set props("LockCSPName")=0
+set props("AutheEnabled")=0
+if $Data(^Security("Apps","/api/referralpilot")) { set sc=##class(Security.Applications).Modify("/api/referralpilot",.props) } else { set sc=##class(Security.Applications).Create("/api/referralpilot",.props) }
+if $System.Status.IsError(sc) write "REST application setup failed: ",$System.Status.GetErrorText(sc),!
+
+// --- CSP Web application for UI dashboard ---
+kill props
+set props("NameSpace")="IRISAPP"
+set props("Enabled")=1
+set props("IsNameSpaceDefault")=0
+set props("Recurse")=1
+set props("AutheEnabled")=0
+set props("LockCSPName")=0
+set props("CSPZENEnabled")=1
+if $Data(^Security("Apps","/csp/irisapp")) { set sc=##class(Security.Applications).Modify("/csp/irisapp",.props) } else { set sc=##class(Security.Applications).Create("/csp/irisapp",.props) }
+if $System.Status.IsError(sc) write "CSP application setup failed: ",$System.Status.GetErrorText(sc),!
+
+// Initialize demo data and production in the IRISAPP namespace.
+zn "IRISAPP"
+do ##class(ReferralPilot.Store).ResetDemo()
+do ##class(ReferralPilot.Knowledge).IndexPolicies()
+try { set sc=##class(ReferralPilot.Setup).StartProduction() if $System.Status.IsError(sc) write "Production start pending: ",$System.Status.GetErrorText(sc),! } catch ex { write "Production autostart not configured: ",ex.DisplayString(),! }
+
+write "Setup complete. REST: /api/referralpilot  UI: /csp/irisapp/ReferralPilot.UI.cls",!
+halt
