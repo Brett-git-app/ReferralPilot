@@ -1,4 +1,5 @@
 # ReferralPilot
+<img width="1197" height="320" alt="bc9651d4beed9849bc8f0d70397d8b8" src="https://github.com/user-attachments/assets/e730fc49-1076-4447-a79a-1f4e6158d13d" />
 
 **An AI-assisted HL7 referral triage workflow for InterSystems IRIS AI Hub.** ReferralPilot accepts a referral as an HL7 v2 message, checks it against a searchable local policy library, evaluates synthetic clinic capacity, and asks an IRIS AI Hub agent to record a reasoned specialty, urgency, and any missing information. Every AI recommendation remains pending until a human approves it. The workflow and its audit trail are stored in IRIS.
 
