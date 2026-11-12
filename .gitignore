@@ -1,6 +1,0 @@
-.env
-*.log
-*.bak
-*.tmp
-~$*
-InterSystems Programming Contest*
