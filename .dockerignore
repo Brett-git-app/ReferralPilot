@@ -1,5 +1,0 @@
-# Keep the build context free of local editor/Word artifacts and scraped pages.
-.git
-InterSystems Programming Contest*
-*.docx
-~$*
