@@ -196,6 +196,7 @@ The AI Hub build supports OpenAI, Anthropic, Gemini, Amazon Bedrock, and experim
 ## Observability
 
 Referral state and a chronological audit trail are persisted in IRIS globals. Each event records the referral ID, stage, actor (system, agent, or reviewer), timestamp, outcome, and relevant evidence. Agent sessions expose token and tool-call statistics in AI Hub; the UI displays the saved decision mode and the workflow trace. The Health endpoint reports `knowledgeBase`, `demoMode`, `agentKeyConfigured`, `apiTokenRequired`, and `reviewerIdentityRequired` so the runtime can be diagnosed at a glance.
+<img width="3408" height="1846" alt="631c744fba77c72498bfd736e76357d" src="https://github.com/user-attachments/assets/ed259ef0-690a-40ec-9d5d-efaa7c8da866" />
 
 ## Development and tests
 
