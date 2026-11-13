@@ -1,3 +1,0 @@
-Class ReferralPilot.Tests.PKG
-{
-}
