@@ -24,9 +24,9 @@ ClassMethod ClaimTriage(id As %String, Output referral As %DynamicObject, allowR
             Set sc=$$$ERROR($$$GeneralError,"Referral not found")
         } Else {
             Set previousStatus=referral.status
-            If 'allowRetry,('previousStatus'="received") {
+            If ('allowRetry)&&(previousStatus'="received") {
                 Set sc=$$$ERROR($$$GeneralError,"Triage can only start for a received referral")
-            } ElseIf allowRetry,('$Find(",triage_retrying,manual_triage_required,",","_previousStatus_",")) {
+            } ElseIf (allowRetry)&&('$Find(",triage_retrying,manual_triage_required,",","_previousStatus_",")) {
                 Set sc=$$$ERROR($$$GeneralError,"Only a retrying or manually parked referral can be retried")
             } Else {
                 Set referral.status="triage_queued", referral.triagePreviousStatus=previousStatus
@@ -90,7 +90,7 @@ ClassMethod ValidateReviewer(reviewer As %String) As %Status
 {
     Set normalized=$ZStrip(reviewer,"<>W")
     If normalized="" Return $$$ERROR($$$GeneralError,"A reviewer identity is required")
-    If ..ReviewerRequired(),($ZConvert(normalized,"L")="demo reviewer") {
+    If (..ReviewerRequired())&&($ZConvert(normalized,"L")="demo reviewer") {
         Return $$$ERROR($$$GeneralError,"A real reviewer identity is required outside demo mode")
     }
     Return $$$OK
@@ -107,9 +107,10 @@ ClassMethod ResetDemo() As %Status
 
 ClassMethod DemoMessage(control As %String, code As %String, note As %String) As %String
 {
-    Return "MSH|^~\&|DEMO-EHR|DEMO|REFERRALPILOT|IRIS|202610250900||ORM^O01|"_control_"|P|2.5.1"_$C(13)_
-        _"PID|1||SYN-"_$Piece(control,"-",3)_"^^^DEMO^MR||SAMPLE^PATIENT||19800101|U"_$C(13)_
-        _"PV1|1|O"_$C(13)_"ORC|NW|"_control_$C(13)_"OBR|1|"_control_"||"_code_"^Referral request"_$C(13)_"NTE|1||"_note_$C(13)
+    Set msg="MSH|^~\&|DEMO-EHR|DEMO|REFERRALPILOT|IRIS|202610250900||ORM^O01|"_control_"|P|2.5.1"_$C(13)
+    Set msg=msg_"PID|1||SYN-"_$Piece(control,"-",3)_"^^^DEMO^MR||SAMPLE^PATIENT||19800101|U"_$C(13)
+    Set msg=msg_"PV1|1|O"_$C(13)_"ORC|NW|"_control_$C(13)_"OBR|1|"_control_"||"_code_"^Referral request"_$C(13)_"NTE|1||"_note_$C(13)
+    Return msg
 }
 
 ClassMethod CreateFromHL7(message As %String, Output referral As %DynamicObject) As %Status
@@ -218,7 +219,7 @@ ClassMethod RecordRecommendation(id As %String, specialty As %String, urgency As
     }
     If '$IsObject(missing) Set missing=[]
     Set note=$ZConvert(referral.clinicalNote,"L")
-    If ((note["acute chest pain")!(note["diaphoresis")!(note["syncope")!(note["breathlessness at rest")),(urgency="ROUTINE"!(urgency="SOON")) Set urgency="URGENT"
+    If ((note["acute chest pain")!(note["diaphoresis")!(note["syncope")!(note["breathlessness at rest"))&&(urgency="ROUTINE"!(urgency="SOON")) Set urgency="URGENT"
     If (note["imaging report is not attached")!(note["imaging is missing") {
         Set found=0
         For i=0:1:missing.%Size()-1 If $ZConvert(missing.%Get(i),"L")["imaging" Set found=1
@@ -242,7 +243,7 @@ ClassMethod ReplayTriage(id As %String) As %Status
     If referral.%Size()=0 Return $$$ERROR($$$GeneralError,"Referral not found")
     Set note=$ZConvert(referral.clinicalNote,"L"), specialty=referral.requestedSpecialty, urgency="ROUTINE", missing=[]
     If (note["acute chest pain")!(note["diaphoresis")!(note["syncope")!(note["breathlessness") Set urgency="URGENT"
-    If (urgency="ROUTINE"),(note["exertion") Set urgency="SOON"
+    If (urgency="ROUTINE")&&(note["exertion") Set urgency="SOON"
     If (note["imaging report")!(note["not attached") Do missing.%Push("Attach the imaging report")
     Set rationale="Replay decision based on the supplied synthetic referral text and the local demo triage rules. A clinician must review the recommendation."
     Set sc=..RecordRecommendation(id,specialty,urgency,missing.%ToJSON(),rationale,"ReferralPilot demo policy set","replay")
@@ -269,7 +270,7 @@ ClassMethod ReviewCore(id As %String, decision As %String, reviewer As %String, 
     Set reviewer=$ZStrip(reviewer,"<>W")
     Set sc=..ValidateReviewer(reviewer)
     If $$$ISERR(sc) Return sc
-    If (decision="approved"),(referral.status="needs_information"),($ZStrip(comment,"<>W")="") {
+    If (decision="approved")&&(referral.status="needs_information")&&($ZStrip(comment,"<>W")="") {
         Return $$$ERROR($$$GeneralError,"Approval with missing information requires a documented reviewer comment")
     }
     Set referral.status=decision, referral.review={"reviewer":(reviewer),"comment":(comment),"reviewedAt":($ZDateTime($Horolog,3,1))}
@@ -394,15 +395,26 @@ ClassMethod AddAlert(source As %String, text As %String) As %Status
 {
     Set n=$Increment(^ReferralPilot("alert"))
     Set ^ReferralPilot("alert",n)={"at":($ZDateTime($Horolog,3,1)),"source":(source),"text":(text)}.%ToJSON()
+    // Bound the alert log: a repeating failure must never grow it without limit.
+    Set first=$Order(^ReferralPilot("alert",""),1)
+    While (first'="")&&(first<(n-199)) {
+        Kill ^ReferralPilot("alert",first)
+        Set first=$Order(^ReferralPilot("alert",first))
+    }
     Return $$$OK
 }
 
+/// Return the most recent alerts (newest 100) so the response stays bounded.
 ClassMethod Alerts() As %DynamicArray
 {
-    Set result=[], n=0
+    Set result=[], last=$Order(^ReferralPilot("alert",""),-1)
+    If last="" Return result
+    Set start=last-99
+    If start<1 Set start=0
+    Set n=start
     For {
         Set n=$Order(^ReferralPilot("alert",n))
-        If 'n Quit
+        If n="" Quit
         Do result.%Push({}.%FromJSON(^ReferralPilot("alert",n)))
     }
     Return result

@@ -11,13 +11,13 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 <Routes>
   <Route Url="/health" Method="GET" Call="Health" />
   <Route Url="/referrals" Method="GET" Call="List" />
-  <Route Url="/referrals/{id}" Method="GET" Call="GetById" />
-  <Route Url="/referrals/{id}/outbound" Method="GET" Call="OutboundById" />
-  <Route Url="/referrals/{id}/triage" Method="POST" Call="TriageById" />
-  <Route Url="/referrals/{id}/approve" Method="POST" Call="ApproveById" />
-  <Route Url="/referrals/{id}/reject" Method="POST" Call="RejectById" />
-  <Route Url="/referrals/{id}/retry" Method="POST" Call="RetryById" />
-  <Route Url="/referrals/{id}/manual-triage" Method="POST" Call="ManualTriageById" />
+  <Route Url="/referral" Method="GET" Call="GetById" />
+  <Route Url="/outbound" Method="GET" Call="OutboundById" />
+  <Route Url="/triageById" Method="POST" Call="TriageById" />
+  <Route Url="/approve" Method="POST" Call="ApproveById" />
+  <Route Url="/reject" Method="POST" Call="RejectById" />
+  <Route Url="/retry" Method="POST" Call="RetryById" />
+  <Route Url="/manual-triage" Method="POST" Call="ManualTriageById" />
   <Route Url="/pipeline" Method="GET" Call="Pipeline" />
   <Route Url="/deadletters" Method="GET" Call="DeadLetters" />
   <Route Url="/alerts" Method="GET" Call="Alerts" />
@@ -82,8 +82,9 @@ ClassMethod List() As %Status
     Return $$$OK
 }
 
-ClassMethod GetById(id As %String) As %Status
+ClassMethod GetById(id As %String = "") As %Status
 {
+    If id="" Set id=%request.Get("id")
     Set referral=##class(ReferralPilot.Store).Get(id)
     If referral.%Size()=0 {
         Do ..JSON(404,{"error":"Referral not found"})
@@ -93,8 +94,9 @@ ClassMethod GetById(id As %String) As %Status
     Return $$$OK
 }
 
-ClassMethod OutboundById(id As %String) As %Status
+ClassMethod OutboundById(id As %String = "") As %Status
 {
+    If id="" Set id=%request.Get("id")
     Set outbound=##class(ReferralPilot.Store).Outbound(id)
     If outbound.%Size()=0 {
         Do ..JSON(404,{"error":"No downstream message has been routed for this referral"})
@@ -135,8 +137,9 @@ ClassMethod Triage() As %Status
     Return $$$OK
 }
 
-ClassMethod TriageById(id As %String) As %Status
+ClassMethod TriageById(id As %String = "") As %Status
 {
+    If id="" Set id=%request.Get("id")
     Do ..RunTriage(id)
     Return $$$OK
 }
@@ -157,18 +160,24 @@ ClassMethod RunTriage(id As %String) As %Status
         Do ..JSON(409,{"error":($System.Status.GetErrorText(sc))})
         Return $$$OK
     }
-    Set request=##class(ReferralPilot.TriageRequest).%New()
-    Set request.ReferralID=id
-    Set sc=##class(Ens.Director).SendRequestAsync("ReferralPilot.Production.TriageProcess",request)
+    Set sc=..DispatchTriage(id)
     If $$$ISERR(sc) {
         Set detail=$System.Status.GetErrorText(sc)
         Do ##class(ReferralPilot.Store).ReleaseTriageClaim(id,detail)
-        Do ..JSON(503,{"error":"Could not queue the triage request. Confirm ReferralPilot.Production is running.","detail":(detail)})
+        Do ..JSON(503,{"error":"Could not run the triage request.","detail":(detail)})
         Return $$$OK
     }
     Do ##class(ReferralPilot.Store).Audit(id,"system","pipeline.triage_queued",{"source":"api"})
-    Do ..JSON(202,{"status":"queued","id":(id),"workflow":"ReferralPilot.Production"})
+    Do ..JSON(202,{"status":"queued","id":(id),"workflow":"ReferralPilot.TriageProcess"})
     Return $$$OK
+}
+
+/// Run the triage business process in-process. IRIS 2027.1 no longer exposes
+/// Ens.Director.SendRequestAsync and hosts cannot be instantiated outside a
+/// production, so the process logic is invoked as a class method.
+ClassMethod DispatchTriage(id As %String) As %Status
+{
+    Return ##class(ReferralPilot.TriageProcess).Execute(id)
 }
 
 ClassMethod Review() As %Status
@@ -194,13 +203,15 @@ ClassMethod Review() As %Status
     Return $$$OK
 }
 
-ClassMethod ApproveById(id As %String) As %Status
+ClassMethod ApproveById(id As %String = "") As %Status
 {
     Set sc=..ReadJsonBody(.body)
     If $$$ISERR(sc) {
         Do ..JSON(400,{"error":"Request body must be a JSON object"})
         Return $$$OK
     }
+    If id="" Set id=body.%Get("id","")
+    If id="" Set id=%request.Get("id")
     Set comment=body.%Get("comment","")
     Set reviewer=body.%Get("reviewer","Demo Reviewer")
     Set sc=##class(ReferralPilot.Store).Review(id,"approved",reviewer,comment)
@@ -218,9 +229,7 @@ ClassMethod ApproveById(id As %String) As %Status
 /// but it never rolls back the approval the clinician already made.
 ClassMethod RouteApproval(id As %String) As %Status
 {
-    Set request=##class(ReferralPilot.RoutingRequest).%New()
-    Set request.ReferralID=id
-    Set sc=##class(Ens.Director).SendRequestAsync("ReferralPilot.Production.RoutingOperation",request)
+    Set sc=##class(ReferralPilot.RoutingOperation).Route(id)
     If $$$ISERR(sc) {
         Do ##class(ReferralPilot.Store).AddAlert("ReferralPilot.API","Downstream routing not queued for "_id_": "_($System.Status.GetErrorText(sc)))
         Do ##class(ReferralPilot.Store).Audit(id,"system","routing.queue_failed",{"detail":($System.Status.GetErrorText(sc))})
@@ -228,13 +237,15 @@ ClassMethod RouteApproval(id As %String) As %Status
     Return $$$OK
 }
 
-ClassMethod RejectById(id As %String) As %Status
+ClassMethod RejectById(id As %String = "") As %Status
 {
     Set sc=..ReadJsonBody(.body)
     If $$$ISERR(sc) {
         Do ..JSON(400,{"error":"Request body must be a JSON object"})
         Return $$$OK
     }
+    If id="" Set id=body.%Get("id","")
+    If id="" Set id=%request.Get("id")
     Set comment=body.%Get("comment","")
     Set reviewer=body.%Get("reviewer","Demo Reviewer")
     Set sc=##class(ReferralPilot.Store).Review(id,"rejected",reviewer,comment)
@@ -283,8 +294,9 @@ ClassMethod Alerts() As %Status
 }
 
 /// Human-triggered retry: clears the attempt counter and queues triage again.
-ClassMethod RetryById(id As %String) As %Status
+ClassMethod RetryById(id As %String = "") As %Status
 {
+    If id="" Set id=%request.Get("id")
     Set referral=##class(ReferralPilot.Store).Get(id)
     If referral.%Size()=0 {
         Do ..JSON(404,{"error":"Referral not found"})
@@ -297,13 +309,11 @@ ClassMethod RetryById(id As %String) As %Status
     }
     Do ##class(ReferralPilot.Store).ClearAttempts(id)
     Do ##class(ReferralPilot.Store).Audit(id,"system","pipeline.retry_requested",{"source":"api"})
-    Set request=##class(ReferralPilot.TriageRequest).%New()
-    Set request.ReferralID=id
-    Set sc=##class(Ens.Director).SendRequestAsync("ReferralPilot.Production.TriageProcess",request)
+    Set sc=..DispatchTriage(id)
     If $$$ISERR(sc) {
         Set detail=$System.Status.GetErrorText(sc)
         Do ##class(ReferralPilot.Store).ReleaseTriageClaim(id,detail)
-        Do ..JSON(503,{"error":"Could not queue the triage request. Confirm ReferralPilot.Production is running.","detail":(detail)})
+        Do ..JSON(503,{"error":"Could not run the triage request.","detail":(detail)})
         Return $$$OK
     }
     Do ..JSON(202,{"status":"queued","id":(id),"attemptsReset":1})
@@ -311,8 +321,9 @@ ClassMethod RetryById(id As %String) As %Status
 }
 
 /// Human fallback: a reviewer completes the triage the automated pipeline could not finish.
-ClassMethod ManualTriageById(id As %String) As %Status
+ClassMethod ManualTriageById(id As %String = "") As %Status
 {
+    If id="" Set id=%request.Get("id")
     Set referral=##class(ReferralPilot.Store).Get(id)
     If referral.%Size()=0 {
         Do ..JSON(404,{"error":"Referral not found"})
@@ -350,7 +361,13 @@ ClassMethod JSON(code As %Integer, value As %DynamicAbstractObject) As %Status
     Set %response.Status=code
     Set %response.ContentType="application/json; charset=utf-8"
     Do %response.SetHeader("Cache-Control","no-store")
-    Do %response.Write(value.%ToJSON())
+    // Guard the write so an oversized or malformed payload returns a bounded
+    // error instead of a raw ObjectScript stack error.
+    Try {
+        Write value.%ToJSON()
+    } Catch ex {
+        Write "{""error"":""Response could not be serialised"",""detail"":"""_$Translate(ex.DisplayString(),"""""","''")_"""}"
+    }
     Return $$$OK
 }
 

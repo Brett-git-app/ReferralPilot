@@ -55,8 +55,8 @@ try {
         }
     }
     $dependencyNames = @($moduleNode.Dependencies.Module | ForEach-Object { $_.Name })
-    if ($dependencyNames -notcontains 'iris-llm') {
-        Add-Failure 'module.xml must declare the iris-llm dependency'
+    if ($dependencyNames -contains 'iris-llm') {
+        Add-Warning 'module.xml declares an iris-llm dependency, which is not published in the public package repository; the %AI.* classes ship inside the AI Hub image'
     }
 } catch {
     Add-Failure "module.xml is not valid XML: $($_.Exception.Message)"

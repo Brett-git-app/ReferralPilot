@@ -27,7 +27,7 @@ Method TestIsDemoModeReturnsBoolean() As %Status
 
 Method TestRunUnknownReferral() As %Status
 {
-    Set result=##class(ReferralPilot.Agent).Run("NO-SUCH-ID")
+    Set result=##class(ReferralPilot.Agent).Triage("NO-SUCH-ID")
     Do ..AssertEquals("Referral not found",result.%Get("error",""))
     Return $$$OK
 }
@@ -38,7 +38,7 @@ Method TestRunProducesReplayRecommendation() As %Status
     // This test exercises the full path by ensuring a recommendation is always recorded.
     Set hl7=##class(ReferralPilot.Store).DemoMessage("MSG-AGENT-001","CARD","Chest pain on exertion.")
     Do ##class(ReferralPilot.Store).CreateFromHL7(hl7,.ref)
-    Set result=##class(ReferralPilot.Agent).Run(ref.id)
+    Set result=##class(ReferralPilot.Agent).Triage(ref.id)
     Do ..AssertEquals("completed",result.%Get("status",""),"Agent.Run must complete")
     Do ..AssertTrue(("replay"=result.%Get("mode",""))||("live"=result.%Get("mode",""))||("replay-fallback"=result.%Get("mode","")),"Mode must be replay, live, or replay-fallback")
     // A recommendation should now be stored regardless of mode.
@@ -52,7 +52,7 @@ Method TestRunProducesAuditEntry() As %Status
 {
     Set hl7=##class(ReferralPilot.Store).DemoMessage("MSG-AGENT-002","NEURO","Headache imaging missing.")
     Do ##class(ReferralPilot.Store).CreateFromHL7(hl7,.ref)
-    Do ##class(ReferralPilot.Agent).Run(ref.id)
+    Do ##class(ReferralPilot.Agent).Triage(ref.id)
     Set stored=##class(ReferralPilot.Store).Get(ref.id)
     Do ..AssertTrue(stored.audit.%Size()>=2,"Agent Run should produce at least 2 audit entries (received + triage event)")
     Return $$$OK

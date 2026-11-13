@@ -14,7 +14,14 @@ Parameter FALLBACKTARGET = "FallbackOperation";
 Method OnRequest(pRequest As ReferralPilot.TriageRequest, Output pResponse As Ens.Response) As %Status
 {
     Set pResponse=##class(Ens.Response).%New()
-    Set id=pRequest.ReferralID
+    Return ..Execute(pRequest.ReferralID,$THIS)
+}
+
+/// Run the triage loop for one referral. pProcess is the live business process
+/// instance when the call comes from the production; when the REST API drives
+/// triage directly it is empty and the fallback is applied inline.
+ClassMethod Execute(id As %String, pProcess = "") As %Status
+{
     Set referral=##class(ReferralPilot.Store).Get(id)
     If referral.%Size()=0 Return $$$OK
     If (referral.status'="triage_queued")&(referral.status'="triage_retrying") {
@@ -27,7 +34,7 @@ Method OnRequest(pRequest As ReferralPilot.TriageRequest, Output pResponse As En
     While (attempts<..#MAXATTEMPTS) {
         Set attempts=attempts+1, ok=0, result={}
         Try {
-            Set result=##class(ReferralPilot.Agent).Run(id)
+            Set result=##class(ReferralPilot.Agent).Triage(id)
             If result.%Get("status","")="error" {
                 Set lastError=result.%Get("error","AI triage failed"), ok=0
             } Else {
@@ -53,7 +60,14 @@ Method OnRequest(pRequest As ReferralPilot.TriageRequest, Output pResponse As En
     Set fallback.Attempts=..#MAXATTEMPTS
     Set fallback.Source="ReferralPilot.TriageProcess"
 
-    Set sc=..SendRequestSync(..#FALLBACKTARGET,fallback,.fbResponse)
+    Set sc=$$$ERROR($$$GeneralError,"Fallback operation is only reachable inside the production")
+    If $ISOBJECT(pProcess) {
+        Try {
+            Set sc=$METHOD(pProcess,"SendRequestSync",..#FALLBACKTARGET,fallback,.fbResponse)
+        } Catch ex {
+            Set sc=$$$ERROR($$$GeneralError,ex.DisplayString())
+        }
+    }
     If $$$ISERR(sc) {
         // Last resort: persist the fallback inline so a lost operation never loses a referral.
         Do ##class(ReferralPilot.Store).AddDeadLetter(id,lastError,..#MAXATTEMPTS)

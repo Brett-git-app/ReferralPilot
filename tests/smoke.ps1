@@ -2,12 +2,15 @@
 param(
     [string]$BaseUrl = 'http://localhost:52773',
     [string]$Token = $env:REFERRALPILOT_API_TOKEN,
+    [string]$IrisUser = '_SYSTEM',
+    [string]$IrisPassword = 'SYS',
     [int]$StartupTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = 'Stop'
 $ApiRoot = "$($BaseUrl.TrimEnd('/'))/api/referralpilot"
-$Headers = @{}
+$Basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($IrisUser):$($IrisPassword)"))
+$Headers = @{ Authorization = "Basic $Basic" }
 if (-not [string]::IsNullOrWhiteSpace($Token)) {
     $Headers['X-ReferralPilot-Token'] = $Token
 }
@@ -97,11 +100,11 @@ $referral = $referrals |
 Assert-True ($null -ne $referral) 'one demo referral is ready for triage'
 
 Write-Host "Starting triage for $($referral.id)..."
-$queued = Invoke-Api -Path "/referrals/$($referral.id)/triage" -Method POST -Body @{}
+$queued = Invoke-Api -Path '/triage' -Method POST -Body @{ id = $referral.id }
 Assert-True ($queued.status -eq 'queued') 'triage request is accepted'
 
 $triage = Wait-For -Description 'triage completion' -TimeoutSeconds 60 -Probe {
-    $current = Invoke-Api -Path "/referrals/$($referral.id)"
+    $current = Invoke-Api -Path "/referral?id=$($referral.id)"
     if ($current.status -in @('pending_review', 'needs_information', 'manual_triage_required')) {
         return $current
     }
@@ -109,7 +112,7 @@ $triage = Wait-For -Description 'triage completion' -TimeoutSeconds 60 -Probe {
 
 if ($triage.status -eq 'manual_triage_required') {
     Write-Warning 'Automated triage exhausted retries; exercising the human fallback path.'
-    $triage = Invoke-Api -Path "/referrals/$($referral.id)/manual-triage" -Method POST -Body @{
+    $triage = Invoke-Api -Path "/manual-triage?id=$($referral.id)" -Method POST -Body @{
         specialty = 'Cardiology'
         urgency = 'SOON'
         missingInformation = @()
@@ -122,7 +125,8 @@ Assert-True ([bool]$triage.recommendation.specialty) 'a recommendation was recor
 Assert-True ($triage.recommendation.reviewRequired -eq 1) 'recommendation still requires human review'
 
 Write-Host 'Approving recommendation...'
-$approved = Invoke-Api -Path "/referrals/$($referral.id)/approve" -Method POST -Body @{
+$approved = Invoke-Api -Path '/approve' -Method POST -Body @{
+    id = $referral.id
     reviewer = 'Validation Reviewer'
     comment = 'Approved by automated end-to-end validation.'
 }
@@ -130,7 +134,7 @@ Assert-True ($approved.status -eq 'approved') 'reviewer approval transitions the
 
 $outbound = Wait-For -Description 'downstream HL7 routing' -TimeoutSeconds 30 -Probe {
     try {
-        $message = Invoke-Api -Path "/referrals/$($referral.id)/outbound"
+        $message = Invoke-Api -Path "/outbound?id=$($referral.id)"
         if ($message.message) { return $message }
     } catch {
         if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw }
@@ -141,7 +145,7 @@ Assert-True ($outbound.message -match "OUT-$([regex]::Escape($referral.id))") 'o
 
 $guardStatus = $null
 try {
-    Invoke-Api -Path "/referrals/$($referral.id)/triage" -Method POST -Body @{} | Out-Null
+    Invoke-Api -Path '/triage' -Method POST -Body @{ id = $referral.id } | Out-Null
 } catch {
     $guardStatus = $_.Exception.Response.StatusCode.value__
 }

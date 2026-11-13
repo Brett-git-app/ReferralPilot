@@ -2,12 +2,15 @@
 param(
     [string]$BaseUrl = 'http://localhost:52773',
     [string]$Token = $env:REFERRALPILOT_API_TOKEN,
+    [string]$IrisUser = '_SYSTEM',
+    [string]$IrisPassword = 'SYS',
     [int]$TimeoutSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
 $ApiRoot = "$($BaseUrl.TrimEnd('/'))/api/referralpilot"
-$Headers = @{}
+$Basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($IrisUser):$($IrisPassword)"))
+$Headers = @{ Authorization = "Basic $Basic" }
 if (-not [string]::IsNullOrWhiteSpace($Token)) {
     $Headers['X-ReferralPilot-Token'] = $Token
 }
@@ -53,7 +56,7 @@ $targets = @{
 foreach ($control in $targets.Keys) {
     $referral = $referrals | Where-Object messageControlId -eq $control | Select-Object -First 1
     Assert-True ($null -ne $referral) "Fixture $control is present"
-    $null = Invoke-Api -Path "/referrals/$($referral.id)/triage" -Method POST -Body @{}
+    $null = Invoke-Api -Path '/triage' -Method POST -Body @{ id = $referral.id }
 }
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)

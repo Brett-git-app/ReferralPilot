@@ -31,9 +31,11 @@ try {
     }
     $health = $null
     $deadline = (Get-Date).AddSeconds(180)
+    $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('_SYSTEM:SYS'))
+    $healthHeaders = @{ Authorization = "Basic $basic" }
     do {
         try {
-            $health = Invoke-RestMethod -Uri 'http://localhost:52773/api/referralpilot/health' -TimeoutSec 5
+            $health = Invoke-RestMethod -Uri 'http://localhost:52773/api/referralpilot/health' -Headers $healthHeaders -TimeoutSec 5
             if ($health.ready -eq 1) { break }
         } catch {
             Start-Sleep -Seconds 2

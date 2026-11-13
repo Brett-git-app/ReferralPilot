@@ -60,11 +60,14 @@ Method Ingest(path As %String) As %Status
         Set sc=stream.LinkToFile(path)
         If $$$ISERR(sc) {
             Do ##class(ReferralPilot.Store).AddAlert("ReferralPilot.HL7Service","Cannot read "_path_": "_$System.Status.GetErrorText(sc))
+            Do ..Archive(path,"bad")
             Return $$$OK
         }
-        While 'stream.AtEnd() Set raw=raw_stream.Read(32000)
+        // In this IRIS build Size is a property of %Stream, not a method.
+        Set raw=stream.Read(stream.Size)
     } Catch ex {
         Do ##class(ReferralPilot.Store).AddAlert("ReferralPilot.HL7Service","Unreadable HL7 file "_path_": "_ex.DisplayString())
+        Do ..Archive(path,"bad")
         Return $$$OK
     }
 
@@ -105,12 +108,16 @@ Method Ingest(path As %String) As %Status
 }
 
 /// Move a consumed file out of the drop folder so it is not ingested twice.
-Method Archive(path As %String) As %Status
+/// Files that cannot be read are archived with a "bad" suffix so a single
+/// malformed file never causes an endless retry loop.
+Method Archive(path As %String, suffix As %String = "") As %Status
 {
     Set archive=..#ARCHIVEDIR
     If '##class(%File).DirectoryExists(archive) Do ##class(%File).CreateDirectoryChain(archive)
     Set stamp=$Translate($ZDateTime($Horolog,3,1),": -","___")
-    Set newPath=archive_"/"_$Piece(path,"/",*)_"-"_stamp_".hl7"
+    Set name=$Piece(path,"/",*)
+    If suffix'="" Set name=name_"."_suffix
+    Set newPath=archive_"/"_name_"-"_stamp_".hl7"
     Do ##class(%File).Rename(path,newPath)
     Return $$$OK
 }

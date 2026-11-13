@@ -7,12 +7,8 @@
       <Description>AI-assisted HL7 referral triage workflow for InterSystems IRIS AI Hub</Description>
       <Packaging>module</Packaging>
       <SystemRequirements Version="&gt;=2026.3" Interoperability="enabled"/>
-      <Dependencies>
-        <Module Name="iris-llm" />
-      </Dependencies>
       <SourcesRoot>src</SourcesRoot>
       <Resource Name="ReferralPilot.PKG" />
-      <Resource Name="ReferralPilot.Tests.PKG" />
     </Module>
   </Document>
 </Export>

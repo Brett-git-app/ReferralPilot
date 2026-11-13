@@ -15,7 +15,13 @@ Parameter DESTINATION = "DOWNSTREAM-CLINIC";
 Method OnMessage(pRequest As ReferralPilot.RoutingRequest, Output pResponse As Ens.Response) As %Status
 {
     Set pResponse=##class(Ens.Response).%New()
-    Set id=pRequest.ReferralID
+    Return ..Route(pRequest.ReferralID)
+}
+
+/// Emit the outbound HL7 message for one approved referral. Exposed as a class
+/// method so the REST API can route without an instantiated operation.
+ClassMethod Route(id As %String) As %Status
+{
     Set referral=##class(ReferralPilot.Store).Get(id)
 
     If referral.%Size()=0 {
@@ -35,7 +41,7 @@ Method OnMessage(pRequest As ReferralPilot.RoutingRequest, Output pResponse As E
 }
 
 /// Build the outbound HL7 message from the approved referral state.
-Method BuildMessage(referral As %DynamicObject) As %String
+ClassMethod BuildMessage(referral As %DynamicObject) As %String
 {
     Set stamp=$ZDateTime($Horolog,3,1)
     Set id=referral.%Get("id","")
@@ -98,7 +104,7 @@ ClassMethod EscapeIdentifier(text As %String) As %String
 }
 
 /// Persist one outgoing message. A disk failure must not fail the operation.
-Method WriteFile(id As %String, message As %String) As %String
+ClassMethod WriteFile(id As %String, message As %String) As %String
 {
     Try {
         Set dir=..#OUTBOUNDDIR

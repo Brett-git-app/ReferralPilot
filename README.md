@@ -13,7 +13,7 @@ Three synthetic ORM referrals exercise distinct outcomes:
 2. A referral missing a required result is flagged for additional information.
 3. A high-risk symptom is escalated to urgent review.
 
-The policy knowledge base uses AI Hub's IRIS vector-backed RAG classes and local FastEmbed embeddings. The LLM is used for judgment and explanation; deterministic checks validate the recommendation and enforce the human-approval gate. The project contains no real patient data.
+The policy knowledge base uses AI Hub's IRIS vector-backed RAG classes and local FastEmbed embeddings. If those components are unavailable in the image, the workflow degrades gracefully: `/health` reports `knowledgeBase: fallback` and the agent falls back to the deterministic `SearchPolicies` tool. The LLM is used for judgment and explanation; deterministic checks validate the recommendation and enforce the human-approval gate. The project contains no real patient data.
 
 ## Requirements
 
@@ -48,15 +48,15 @@ The policy knowledge base uses AI Hub's IRIS vector-backed RAG classes and local
    docker compose up --build -d
    ```
 
-6. Check that IRIS is ready and open the dashboard:
+6. Check that IRIS is ready and open the dashboard. Both web applications are created with `AutheEnabled=32` (password authentication), so IRIS credentials must be supplied with HTTP Basic auth:
 
    ```bash
-   curl http://localhost:52773/api/referralpilot/health
+   curl -u _SYSTEM:SYS http://localhost:52773/api/referralpilot/health
    ```
 
-   Open [http://localhost:52773/csp/irisapp/ReferralPilot.UI.cls](http://localhost:52773/csp/irisapp/ReferralPilot.UI.cls).
+   Open [http://localhost:52773/csp/irisapp/ReferralPilot.UI.cls](http://localhost:52773/csp/irisapp/ReferralPilot.UI.cls) and sign in with `_SYSTEM` / `SYS`. The dashboard asks once for the same credentials so its API calls can be authorised, then remembers them for the browser session.
 
-The first build installs the ZPM client and the `iris-llm` package, compiles this project's ObjectScript classes, creates the REST and CSP web applications, indexes the policy knowledge base, seeds three synthetic demo referrals, and starts the ensemble production. No AI Hub image, or image derived from it, is published by this repository.
+The first build installs the ZPM client, creates the IRISAPP database and namespace, compiles this project's ObjectScript classes, creates the REST and CSP web applications, indexes the policy knowledge base, seeds three synthetic demo referrals, and starts the ensemble production. The `%AI.*` AI Hub classes ship inside the AI Hub image, so no external `iris-llm` ZPM package is installed. No AI Hub image, or image derived from it, is published by this repository.
 
 ## API
 
@@ -66,20 +66,21 @@ The REST API is mounted at `/api/referralpilot`:
 |---|---|---|
 | `GET` | `/health` | Readiness check with agent-key, demo-mode, and knowledge-base status |
 | `GET` | `/referrals` | List referrals and workflow state |
-| `GET` | `/referrals/{id}` | Get one referral by id with full audit trail |
-| `GET` | `/referrals/{id}/outbound` | Inspect the HL7 message produced after approval |
+| `GET` | `/referral?id={id}` | Get one referral by id with full audit trail |
+| `GET` | `/outbound?id={id}` | Inspect the HL7 message produced after approval |
 | `POST` | `/hl7` | Submit one HL7 v2 referral message (raw body, `Content-Type: text/plain`) |
-| `POST` | `/referrals/{id}/triage` | Queue the AI triage decision for referral `{id}` |
-| `POST` | `/referrals/{id}/approve` | Approve a pending recommendation and queue the downstream HL7 routing operation. Optional body: `{"reviewer":"...","comment":"..."}` |
-| `POST` | `/referrals/{id}/reject` | Reject a pending recommendation. Optional body: `{"reviewer":"...","comment":"..."}` |
-| `POST` | `/referrals/{id}/retry` | Clear the failed-attempt counter and re-queue automated triage |
-| `POST` | `/referrals/{id}/manual-triage` | Human completes a referral parked by the pipeline fallback. Body: `{"specialty":"Cardiology","urgency":"URGENT","missingInformation":[],"rationale":"...","reviewer":"..."}` |
+| `POST` | `/triageById?id={id}` | Queue the AI triage decision for referral `{id}` |
+| `POST` | `/triage` | Same as above with the id in the body: `{"id":"..."}` |
+| `POST` | `/approve` | Approve a pending recommendation and queue the downstream HL7 routing operation. Body: `{"id":"...","reviewer":"...","comment":"..."}` (id may also be passed as `?id=`) |
+| `POST` | `/reject` | Reject a pending recommendation. Body: `{"id":"...","reviewer":"...","comment":"..."}` (id may also be passed as `?id=`) |
+| `POST` | `/retry?id={id}` | Clear the failed-attempt counter and re-queue automated triage |
+| `POST` | `/manual-triage?id={id}` | Human completes a referral parked by the pipeline fallback. Body: `{"specialty":"Cardiology","urgency":"URGENT","missingInformation":[],"rationale":"...","reviewer":"..."}` |
 | `GET` | `/pipeline` | Pipeline health: status counts, manual queue, dead letters, alerts, recorded attempts |
 | `GET` | `/deadletters` | Dead-letter records written by the fallback operation |
 | `GET` | `/alerts` | Operational alerts raised by the fallback operation |
 | `POST` | `/demo/reset` | Reload the three de-identified demo referrals |
 
-The API also accepts body-based POSTs for backward compatibility: `POST /triage` with `{"id":"..."}` and `POST /review` with `{"id":"...","decision":"approved|rejected","reviewer":"...","comment":"..."}`.
+Routes use plain paths with the referral id passed as a query parameter (`?id=...`). The `%CSP.REST` route-pattern compiler in this AI Hub build rejects `{id}` URL templates, so the original `/referrals/{id}/...` style routes were replaced with static paths. `POST /approve`, `POST /reject`, and `POST /triage` accept the id inside the JSON body, and `POST /review` accepts `{"id":"...","decision":"approved|rejected","reviewer":"...","comment":"..."}`.
 
 The UI's **Load demo** action loads the three synthetic examples defined in `ReferralPilot.Store`. Individual examples are also provided in `data/`; submit an HL7 file as the request body to `/hl7` with `Content-Type: text/plain`.
 
@@ -99,7 +100,7 @@ Agent errors never auto-approve a referral. When no LLM key is configured, or `R
 Automation that cannot finish must never silently drop a referral. ReferralPilot therefore implements an explicit exception pipeline inside the interoperability production rather than returning a bare HTTP error:
 
 ```
-POST /referrals/{id}/triage
+POST /triage   {"id":"R3"}
         |
         v
   TriageProcess (Business Process)
@@ -118,7 +119,7 @@ POST /referrals/{id}/triage
               +-- dead-letter JSON written to the DeadLetterDir setting
                         |
                         v
-              Human fallback: POST /referrals/{id}/manual-triage
+              Human fallback: POST /manual-triage?id={id}
                         |   (same specialty whitelist and urgency safety rules apply)
                         v
               status pending_review -> normal Approve / Reject gate
@@ -128,7 +129,7 @@ Design points:
 
 - **Bounded retries, not infinite loops.** `TriageProcess` stops after `MAXATTEMPTS` and always returns a success status, so the Ensemble message is not re-queued forever.
 - **The fallback operation is idempotent in spirit.** It records a dead letter, parks the referral, raises an alert, and writes a file an operator can act on. It never retries the agent. The dead-letter directory is the `DeadLetterDir` production setting, so it can be pointed at a shared volume without a code change.
-- **Automatic recovery is still available.** `POST /referrals/{id}/retry` clears the attempt counter and re-queues triage, so an operator can recover after fixing the provider.
+- **Automatic recovery is still available.** `POST /retry?id={id}` clears the attempt counter and re-queues triage, so an operator can recover after fixing the provider.
 - **Human triage keeps every guard.** `Store.ManualTriage` reuses `RecordRecommendation`, so the specialty whitelist, urgency enumeration, and acute-symptom escalation (ROUTINE to URGENT) still apply to decisions entered by a person.
 - **The dashboard surfaces the exception state.** The banner shows `manual queue / dead letters / alerts`, parked referrals render a "Pipeline fallback" panel with **Retry automated triage** and **Complete triage manually**.
 
@@ -172,7 +173,7 @@ Drop an HL7 file into the inbox to exercise the service without the REST API:
 docker compose exec iris sh -c "mkdir -p /tmp/referralpilot-inbound && sed 's/MSG-CARDIO-001/CLINIC-20261102-A/g' /home/irisowner/dev/data/referral-cardio.hl7 > /tmp/referralpilot-inbound/clinic-1.hl7"
 ```
 
-The service picks the file up within one adapter interval (5 seconds), archives it, and the new referral appears in the dashboard as `received`.
+The service picks the file up within one adapter interval (5 seconds), archives it, and queues AI triage with the same business process the REST endpoint uses. In replay mode the new referral moves automatically to `pending_review` (or `needs_information` when a required result is missing), so it appears in the dashboard already awaiting the human approval gate.
 
 ## Configuration
 
@@ -205,17 +206,25 @@ The repository ships four unit-test classes under `src/ReferralPilot/Tests/`:
 - `ReferralPilot.Tests.Pipeline` — Attempt counting, fallback operation routing, dead-letter and alert recording, manual triage recovery, safety escalation on the human path, pipeline statistics.
 - `ReferralPilot.Tests.Routing` — Approved referrals produce an outbound ORM^O01, unapproved referrals are skipped and audited, unknown referrals raise an alert, free-text escaping.
 
-Run all tests inside the container:
+These classes depend on the `%UnitTest` include. The AI Hub EAP image used here does not ship `%UnitTest`, so `.dockerignore` keeps `src/ReferralPilot/Tests` out of the container image and the build stays clean. On an IRIS build that includes `%UnitTest` (for example a standard Community distribution), run all tests inside the container:
 
 ```bash
-docker compose exec iris iris session IRISAPP "##class(%UnitTest.Manager).RunTest(\"ReferralPilot.Tests\")"
+docker compose exec iris iris session IRIS -U IRISAPP "##class(%UnitTest.Manager).RunTest(\"ReferralPilot.Tests\")"
 ```
 
 Run a single test class:
 
 ```bash
-docker compose exec iris iris session IRISAPP "##class(%UnitTest.Manager).RunTest(\"ReferralPilot.Tests.Store\")"
+docker compose exec iris iris session IRIS -U IRISAPP "##class(%UnitTest.Manager).RunTest(\"ReferralPilot.Tests.Store\")"
 ```
+
+> **Windows PowerShell note.** The examples above use POSIX shell quoting. PowerShell strips the inner quotes before `iris session` receives them, so the command fails with `<NOROUTINE>`. Pipe the ObjectScript through stdin instead (`-T` disables the TTY so stdin is passed through):
+>
+> ```powershell
+> 'write ##class(%UnitTest.Manager).RunTest("ReferralPilot.Tests"),! halt' | docker compose exec -T iris iris session IRIS -U IRISAPP
+> ```
+>
+> Alternatively run the `bash` examples from WSL, Git Bash, or macOS/Linux.
 
 The API and replay mode do not require an external model key. Live Agent calls require outbound network access from the container and the configured provider key.
 
@@ -265,7 +274,7 @@ The defensible acceptance sequence is:
 
 1. Static validation succeeds.
 2. The image builds and the container remains running.
-3. `ReferralPilot.Tests` reports no unit-test failures.
+3. `ReferralPilot.Tests` reports no unit-test failures (on a build that includes `%UnitTest`).
 4. The smoke test succeeds.
 5. Live mode is tested separately with a provider key; replay mode is not presented as a live-model proof.
 
@@ -279,7 +288,8 @@ These gates make the distinction between "code exists", "code compiles", and "th
 - Every mutation remains subject to human review; agent tools cannot approve or route a referral.
 - HL7 intake is limited to 1 MiB and requires `ORM^O01`, PID-3, OBR-4, NTE, and MSH-10.
 - The optional API token and reviewer requirements are suitable for controlled demos and small deployments. A production clinical system still needs IRIS authentication/SSO, RBAC, TLS, secret management, durable backing services, and legal/privacy review.
-- The container build currently resolves the latest ZPM installer and `iris-llm` release. For regulated deployment, pin and mirror both dependencies to make builds reproducible.
+- The container build resolves the latest ZPM installer from the community repository. For regulated deployment, pin and mirror that dependency to make builds reproducible.
+- Both web applications use `AutheEnabled=32` (IRIS password authentication). For any non-demo deployment, replace the default `_SYSTEM`/`SYS` credentials, enable TLS, and issue a dedicated least-privilege user for the dashboard and API.
 
 
 ## License

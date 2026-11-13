@@ -9,7 +9,7 @@
 
 1. **Docker + IRIS are running**
    ```bash
-   curl http://localhost:52773/api/referralpilot/health
+   curl -u _SYSTEM:SYS http://localhost:52773/api/referralpilot/health
    ```
    It should return `"ready": 1`. If `"demoMode": true` and `"agentKeyConfigured": false`, the app is in replay mode — that is fully recordable, and the banner clearly shows "REPLAY MODE · human approval required".
 2. **Recording resolution**: 1920×1080, browser maximized, unrelated tabs closed.
@@ -27,7 +27,7 @@
 **Actions**:
 1. Open a terminal at the project root and run:
    ```bash
-   curl http://localhost:52773/api/referralpilot/health | python -m json.tool
+   curl -u _SYSTEM:SYS http://localhost:52773/api/referralpilot/health | python -m json.tool
    ```
 2. Point out the JSON fields: `ready: 1`, `irisNamespace: "IRISAPP"`, `agentKeyConfigured`, `demoMode`, `knowledgeBase`.
 3. Open a browser at `http://localhost:52773/csp/irisapp/ReferralPilot.UI.cls`.
@@ -150,7 +150,7 @@
 2. Refresh the page: case 2 now shows the **manual triage required** badge, and the banner pill reads `manual queue 1 · dead letters 1 · alerts 1`.
 3. The detail panel shows a **Pipeline fallback** section with `lastError`.
 4. Click **Complete triage manually** → pick specialty and urgency in the dialog's dropdowns → the status returns to **pending review**.
-5. Optional: open `http://localhost:52773/api/referralpilot/deadletters` in the browser to show the dead-letter record.
+5. Optional: in a terminal, run `curl -u _SYSTEM:SYS http://localhost:52773/api/referralpilot/deadletters` to show the dead-letter record.
 
 **Narration**:
 

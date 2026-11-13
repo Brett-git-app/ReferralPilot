@@ -1,4 +1,3 @@
-Include %AI
 Include %occStatus
 
 /// Referral decision agent. It proposes; only a reviewer can approve.
@@ -33,7 +32,7 @@ Method %OnInit() As %Status
     If $$$ISERR(sc) Return sc
     Set sc=##class(ReferralPilot.Knowledge).BuildKB(.kb)
     If $$$ISOK(sc) {
-        Set sc=kb.AddToAgent(..)
+        Set sc=kb.AddToAgent($THIS)
         If $$$ISERR(sc) Return sc
     }
     Return $$$OK
@@ -44,16 +43,16 @@ ClassMethod IsDemoMode() As %Boolean
     Return ($ZConvert($System.Util.GetEnviron("REFERRALPILOT_DEMO_MODE"),"U")="TRUE")
 }
 
-ClassMethod Run(id As %String) As %DynamicObject
+ClassMethod Triage(id As %String) As %DynamicObject
 {
     Set referral=##class(ReferralPilot.Store).Get(id)
     If referral.%Size()=0 Return {"error":"Referral not found"}
     If ..IsDemoMode() {
         Do ##class(ReferralPilot.Store).Audit(id,"system","triage.demo_mode",{"note":"REFERRALPILOT_DEMO_MODE=true; deterministic replay used."})
-        Return {"mode":"replay","status":"completed","sc":##class(ReferralPilot.Store).ReplayTriage(id)}
+        Return {"mode":"replay","status":"completed","sc":(##class(ReferralPilot.Store).ReplayTriage(id))}
     }
     Set key=$System.Util.GetEnviron("OPENAI_API_KEY")
-    If key="" Return {"mode":"replay","status":"completed","sc":##class(ReferralPilot.Store).ReplayTriage(id)}
+    If key="" Return {"mode":"replay","status":"completed","sc":(##class(ReferralPilot.Store).ReplayTriage(id))}
     Try {
         Set agent=..%New()
         $$$ThrowOnError(agent.%Init())

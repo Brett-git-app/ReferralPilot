@@ -8,11 +8,34 @@ do r.Get("/packages/zpm/latest/installer")
 do $system.OBJ.LoadStream(r.HttpResponse.Data,"c")
 zpm "enable -community"
 
-zn "IRISAPP"
-zpm "install iris-llm"
-zpm "load /home/irisowner/dev/ -v":1:1
+// The AI Hub EAP image ships only %SYS and USER. Create the IRISAPP database
+// file, register it, then create the namespace and enable Interoperability.
+set dir="/usr/irissys/mgr/irisapp"
+set st=##class(SYS.Database).Create(dir,.props)
+if $System.Status.IsError(st) write "IRISAPP database file: ",$System.Status.GetErrorText(st),!
+kill props
+set props("Directory")=dir
+set props("Resource")="%DB_IRISAPP"
+set st=##class(Config.Databases).Create("IRISAPP",.props)
+if $System.Status.IsError(st) write "IRISAPP database: ",$System.Status.GetErrorText(st),!
+kill props
+set props("Globals")="IRISAPP"
+set props("Routines")="IRISAPP"
+set st=##class(Config.Namespaces).Create("IRISAPP",.props)
+if $System.Status.IsError(st) write "IRISAPP namespace: ",$System.Status.GetErrorText(st),!
+do ##class(%EnsembleMgr).EnableNamespace("IRISAPP",1)
+zpm "enable -map -repos -globally"
 
-// --- REST Web application for API ---
+// %AI.* AI Hub classes are built into this image, so the external iris-llm
+// ZPM module is not required.
+zn "IRISAPP"
+zpm "load /home/irisowner/dev/ -v"
+// Force a full recompile to defeat any IPM build cache.
+set sc=$system.OBJ.LoadDir("/home/irisowner/dev/src/ReferralPilot/","*.cls",.err,"c",1)
+if $System.Status.IsError(sc) write "LoadDir: ",$System.Status.GetErrorText(sc),!
+do $system.OBJ.CompileAll("ReferralPilot.*",.err)
+
+// --- REST Web application for API (Forms cookie auth so browser UI fetch works) ---
 zn "%SYS"
 kill props
 set props("NameSpace")="IRISAPP"
@@ -20,23 +43,24 @@ set props("DispatchClass")="ReferralPilot.API"
 set props("Enabled")=1
 set props("IsNameSpaceDefault")=0
 set props("Recurse")=1
-set props("Type")=2
 set props("CSPZENEnabled")=1
 set props("LockCSPName")=0
-set props("AutheEnabled")=0
-if $Data(^Security("Apps","/api/referralpilot")) { set sc=##class(Security.Applications).Modify("/api/referralpilot",.props) } else { set sc=##class(Security.Applications).Create("/api/referralpilot",.props) }
+set props("AutheEnabled")=32
+set sc=##class(Security.Applications).Create("/api/referralpilot",.props)
+if $System.Status.IsError(sc) set sc=##class(Security.Applications).Modify("/api/referralpilot",.props)
 if $System.Status.IsError(sc) write "REST application setup failed: ",$System.Status.GetErrorText(sc),!
 
-// --- CSP Web application for UI dashboard ---
+// --- CSP Web application for UI dashboard (same Forms auth as REST) ---
 kill props
 set props("NameSpace")="IRISAPP"
 set props("Enabled")=1
 set props("IsNameSpaceDefault")=0
 set props("Recurse")=1
-set props("AutheEnabled")=0
+set props("AutheEnabled")=32
 set props("LockCSPName")=0
 set props("CSPZENEnabled")=1
-if $Data(^Security("Apps","/csp/irisapp")) { set sc=##class(Security.Applications).Modify("/csp/irisapp",.props) } else { set sc=##class(Security.Applications).Create("/csp/irisapp",.props) }
+set sc=##class(Security.Applications).Create("/csp/irisapp",.props)
+if $System.Status.IsError(sc) set sc=##class(Security.Applications).Modify("/csp/irisapp",.props)
 if $System.Status.IsError(sc) write "CSP application setup failed: ",$System.Status.GetErrorText(sc),!
 
 // Initialize demo data and production in the IRISAPP namespace.
