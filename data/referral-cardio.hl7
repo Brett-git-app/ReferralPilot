@@ -1,6 +1,0 @@
-MSH|^~\&|DEMO-EHR|DEMO|REFERRALPILOT|IRIS|202610250900||ORM^O01|MSG-CARDIO-001|P|2.5.1
-PID|1||SYN-CARDIO-001^^^DEMO^MR||SAMPLE^PATIENT||19800101|U
-PV1|1|O
-ORC|NW|MSG-CARDIO-001
-OBR|1|MSG-CARDIO-001||CARD^Cardiology referral
-NTE|1||Chest discomfort on exertion for three weeks. ECG attached. No shortness of breath at rest.
